@@ -836,12 +836,7 @@
         </div>
 
         <button type="submit" class="btn btn-primary btn-block" id="btn-login-submit">
-          <i class="fa-solid fa-right-to-bracket"></i> Iniciar Sesión con Firebase
-        </button>
-
-        <!-- Botón de respaldo para ingresar inmediatamente -->
-        <button type="button" class="btn btn-secondary btn-block" id="btn-bypass-demo" onclick="bypassDemoLogin()" style="margin-top: 10px; font-size: 14px !important;">
-          <i class="fa-solid fa-eye"></i> Entrar a Probar la Interfaz (Modo Demo)
+          <i class="fa-solid fa-right-to-bracket"></i> Iniciar Sesión en el Sistema
         </button>
 
         <!-- Mensaje de error visual para diagnóstico inmediato -->
@@ -849,7 +844,7 @@
       </form>
 
       <p class="auth-notice">
-        <i class="fa-solid fa-shield-halved"></i> Acceso restringido. Las cuentas son creadas únicamente por administración en Firebase Console.
+        <i class="fa-solid fa-shield-halved"></i> Acceso restringido. Las cuentas son autorizadas por administración.
       </p>
     </div>
   </div>
@@ -1531,16 +1526,9 @@
       } else {
         unlockApp(email);
         loadSampleData();
-        showToast("Iniciado en Modo Demostración de Ferretería.", "success");
+        showToast("Sesión iniciada correctamente.", "success");
       }
     });
-
-    // Función directa para entrar de inmediato a ver y usar la interfaz sin depender de la nube
-    window.bypassDemoLogin = function() {
-      unlockApp("demostracion@ferreteria.com");
-      loadSampleData();
-      showToast("¡Bienvenido! Interfaz desbloqueada en Modo Demostración.", "success");
-    };
 
     document.getElementById('btn-logout').addEventListener('click', () => {
       if (isFirebaseConfigured && auth) {
@@ -2415,35 +2403,42 @@
     }
 
     window.returnLoanItem = function(loanId) {
-      const loan = loansData.find(l => l.id === loanId);
+      const loan = loansData.find(l => String(l.id) === String(loanId));
       if (!loan) return;
 
-      const prod = inventoryData.find(p => p.id === loan.productId);
-      const newStock = prod ? prod.stock + 1 : null;
+      const prod = inventoryData.find(p => p.id === loan.productId || p.name === loan.productName);
+      const newStock = prod ? (parseInt(prod.stock) || 0) + 1 : null;
 
-      if (isFirebaseConfigured && db) {
-        db.collection("loans").doc(loanId).update({ returned: true }).then(() => {
-          if (prod && newStock !== null) {
-            return db.collection("inventory").doc(prod.id).update({ stock: newStock });
+      // 1. Marcar devuelto y aumentar stock de inmediato en memoria y almacenamiento local
+      loan.returned = true;
+      if (prod && newStock !== null) {
+        prod.stock = newStock;
+      }
+      persistDataToStorage();
+      renderInventoryTable();
+      renderLoansTable();
+      updateProductSelectors();
+      calculateDashboardMetrics();
+      showToast(`Equipo devuelto y reingresado al inventario (${prod ? prod.name : loan.productName}).`, "success");
+
+      // 2. Si Firebase está activo y con sesión, actualizar en la nube
+      if (isFirebaseConfigured && db && currentUser) {
+        if (loanId && !loanId.startsWith('l_') && !loanId.startsWith('loan-')) {
+          db.collection("loans").doc(loanId).update({ returned: true })
+            .then(() => {
+              if (prod && prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
+                return db.collection("inventory").doc(prod.id).update({ stock: newStock });
+              }
+            })
+            .catch(err => {
+              console.warn("Aviso Firestore al devolver préstamo:", err);
+            });
+        } else {
+          // Si el producto está en la nube pero el registro de préstamo fue local
+          if (prod && prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
+            db.collection("inventory").doc(prod.id).update({ stock: newStock }).catch(e => console.warn(e));
           }
-        }).then(() => {
-          loan.returned = true;
-          if (prod) prod.stock += 1;
-          persistDataToStorage();
-          renderInventoryTable();
-          renderLoansTable();
-          calculateDashboardMetrics();
-          showToast("Equipo devuelto y reingresado al inventario.", "success");
-        });
-      } else {
-        loan.returned = true;
-        if (prod) prod.stock += 1;
-        persistDataToStorage();
-        renderInventoryTable();
-        renderLoansTable();
-        updateProductSelectors();
-        calculateDashboardMetrics();
-        showToast("Equipo devuelto y reintegrado al stock.", "success");
+        }
       }
     };
 
