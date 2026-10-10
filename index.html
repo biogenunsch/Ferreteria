@@ -1105,6 +1105,7 @@
                       <th>Total Cobrado</th>
                       <th>Cliente</th>
                       <th>Vendedor</th>
+                      <th style="text-align: center;">Acción</th>
                     </tr>
                   </thead>
                   <tbody id="sales-tbody"></tbody>
@@ -1874,7 +1875,7 @@
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 24px; color: var(--text-muted);">No se registran ventas realizadas aún.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--text-muted);">No se registran ventas realizadas aún.</td></tr>`;
         return;
       }
 
@@ -1888,9 +1889,65 @@
           <td><strong style="color: var(--success);">S/ ${parseFloat(sale.total).toFixed(2)}</strong></td>
           <td>${sale.client || 'Mostrador'}</td>
           <td>${sale.seller || 'Admin'}</td>
+          <td style="text-align: center;">
+            <button class="btn btn-secondary btn-sm" onclick="deleteSale('${sale.id}')" title="Anular venta y reponer stock por devolución" style="color: var(--danger); white-space: nowrap;">
+              <i class="fa-solid fa-arrow-rotate-left"></i> Anular
+            </button>
+          </td>
         </tr>
       `).join('');
     }
+
+    // Anular o eliminar una venta del historial devolviendo las unidades al inventario
+    window.deleteSale = function(saleId) {
+      const sale = salesData.find(s => s.id === saleId);
+      if (!sale) return;
+
+      const confirmMsg = `¿Deseas anular esta venta de "${sale.productName}" (${sale.quantity} und.)?\n\nEl total de S/ ${parseFloat(sale.total).toFixed(2)} se restará de los ingresos y las ${sale.quantity} unidades volverán al inventario disponible.`;
+      if (!confirm(confirmMsg)) return;
+
+      const qtyToRestore = parseInt(sale.quantity) || 1;
+      const prod = inventoryData.find(p => p.id === sale.productId || p.name === sale.productName);
+      const newStock = prod ? (parseInt(prod.stock) || 0) + qtyToRestore : null;
+
+      // 1. Eliminar venta en memoria local de inmediato
+      salesData = salesData.filter(s => s.id !== saleId);
+      if (prod && newStock !== null) {
+        prod.stock = newStock;
+      }
+      renderSalesTable();
+      renderInventoryTable();
+      updateProductSelectors();
+      calculateDashboardMetrics();
+
+      // 2. Si Firebase está conectado, actualizar Firestore
+      if (isFirebaseConfigured && db && currentUser) {
+        // Si el ID de venta es legítimo de Firestore
+        if (saleId && !saleId.startsWith('s_') && !saleId.startsWith('sale-')) {
+          db.collection("sales").doc(saleId).delete()
+            .then(() => {
+              if (prod && prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
+                return db.collection("inventory").doc(prod.id).update({ stock: newStock });
+              }
+            })
+            .then(() => {
+              showToast("Venta anulada y stock reintegrado en Firestore.", "info");
+            })
+            .catch(err => {
+              console.warn("Aviso Firestore al anular venta:", err);
+              showToast("Venta anulada localmente.", "info");
+            });
+        } else {
+          // Venta con ID local pero con producto en la nube
+          if (prod && prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
+            db.collection("inventory").doc(prod.id).update({ stock: newStock }).catch(e => console.warn(e));
+          }
+          showToast("Venta anulada y stock devuelto al inventario.", "info");
+        }
+      } else {
+        showToast("Venta anulada y unidades devueltas al stock.", "info");
+      }
+    };
 
     function renderLoansTable() {
       const tbody = document.getElementById('loans-tbody');
