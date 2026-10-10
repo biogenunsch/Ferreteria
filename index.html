@@ -1627,7 +1627,14 @@
 
       if (savedInv) {
         try {
-          inventoryData = JSON.parse(savedInv);
+          const parsed = JSON.parse(savedInv);
+          // Eliminar duplicados si existían
+          const seen = new Set();
+          inventoryData = parsed.filter(item => {
+            if (!item.id || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
         } catch (e) {
           inventoryData = [...sampleInventory];
         }
@@ -1637,7 +1644,14 @@
 
       if (savedSales) {
         try {
-          salesData = JSON.parse(savedSales);
+          const parsed = JSON.parse(savedSales);
+          // Eliminar duplicados si existían
+          const seen = new Set();
+          salesData = parsed.filter(item => {
+            if (!item.id || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
         } catch (e) {
           salesData = [...sampleSales];
         }
@@ -1647,7 +1661,13 @@
 
       if (savedLoans) {
         try {
-          loansData = JSON.parse(savedLoans);
+          const parsed = JSON.parse(savedLoans);
+          const seen = new Set();
+          loansData = parsed.filter(item => {
+            if (!item.id || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
         } catch (e) {
           loansData = [...sampleLoans];
         }
@@ -1656,6 +1676,9 @@
       }
 
       logsData = [...sampleLogs];
+
+      // Guardar limpio sin duplicados
+      persistDataToStorage();
 
       renderInventoryTable();
       renderSalesTable();
@@ -2178,11 +2201,14 @@
           db.collection("inventory").add(productObj)
             .then((docRef) => {
               restoreBtn();
-              inventoryData.unshift({ id: docRef.id, ...productObj });
-              persistDataToStorage();
-              renderInventoryTable();
-              updateProductSelectors();
-              calculateDashboardMetrics();
+              // Si onSnapshot no lo agregó aún, agregarlo verificando que no exista ya
+              if (!inventoryData.some(p => p.id === docRef.id)) {
+                inventoryData.unshift({ id: docRef.id, ...productObj });
+                persistDataToStorage();
+                renderInventoryTable();
+                updateProductSelectors();
+                calculateDashboardMetrics();
+              }
               showToast("Nuevo artículo guardado en inventario.", "success");
               closeModal('modal-product');
             })
@@ -2190,13 +2216,16 @@
               restoreBtn();
               console.error("Error al agregar en Firestore:", err);
               // Fallback automático para que siempre se agregue a la pantalla y localStorage
-              inventoryData.unshift({ id: 'p_' + Date.now(), ...productObj });
-              persistDataToStorage();
-              renderInventoryTable();
-              updateProductSelectors();
-              calculateDashboardMetrics();
+              const localId = 'p_' + Date.now();
+              if (!inventoryData.some(p => p.id === localId)) {
+                inventoryData.unshift({ id: localId, ...productObj });
+                persistDataToStorage();
+                renderInventoryTable();
+                updateProductSelectors();
+                calculateDashboardMetrics();
+              }
               closeModal('modal-product');
-              showToast("Guardado y respaldado en navegador (Aviso Firestore: " + (err.code || err.message) + ")", "warning");
+              showToast("Guardado localmente.", "warning");
             });
         }
       } else {
@@ -2302,13 +2331,15 @@
         // Intentar registrar en Firestore
         db.collection("sales").add(saleRecord)
           .then((saleDoc) => {
-            // Guardar localmente también para persistencia instantánea
-            salesData.unshift({ id: saleDoc.id, ...saleRecord });
-            prod.stock = newStock;
-            persistDataToStorage();
-            renderSalesTable();
-            renderInventoryTable();
-            calculateDashboardMetrics();
+            // Solo agregar localmente si onSnapshot no lo agregó ya en tiempo real
+            if (!salesData.some(s => s.id === saleDoc.id)) {
+              salesData.unshift({ id: saleDoc.id, ...saleRecord });
+              prod.stock = newStock;
+              persistDataToStorage();
+              renderSalesTable();
+              renderInventoryTable();
+              calculateDashboardMetrics();
+            }
 
             // Si el producto tiene un ID guardado en Firestore, actualizar su stock en la nube
             if (prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
