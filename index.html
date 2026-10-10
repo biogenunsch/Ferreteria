@@ -1426,19 +1426,30 @@
     ];
 
     const sampleSales = [
-      { id: "s1", date: "2026-10-08 10:30", productId: "p1", productName: "Tubo PVC Presión 1/2", category: "Gasfitería", quantity: 5, unitPrice: 5.50, total: 27.50, client: "Maestro Pepe", seller: "Mamá" },
-      { id: "s2", date: "2026-10-08 11:15", productId: "p5", productName: "Interruptor Doble con Placa", category: "Electricidad", quantity: 4, unitPrice: 3.20, total: 12.80, client: "Vecino Luis", seller: "Papá" },
-      { id: "s3", date: "2026-10-08 12:40", productId: "p6", productName: "Foco LED 12W Luz Fría", category: "Electricidad", quantity: 6, unitPrice: 2.50, total: 15.00, client: "Cliente Mostrador", seller: "Papá" },
-      { id: "s4", date: "2026-10-08 14:10", productId: "p7", productName: "Bolsa de Cemento Portland", category: "Construcción", quantity: 10, unitPrice: 7.20, total: 72.00, client: "Contratista Rojas", seller: "Mamá" }
+      { id: "s1", date: "2026-10-08 10:30", productId: "p1", productName: "Tubo PVC Presión 1/2", category: "Gasfitería", quantity: 5, unitPrice: 5.50, total: 27.50, client: "Maestro Juan", seller: "Ventas" },
+      { id: "s2", date: "2026-10-08 11:15", productId: "p5", productName: "Interruptor Doble con Placa", category: "Electricidad", quantity: 4, unitPrice: 3.20, total: 12.80, client: "Cliente Mostrador", seller: "Caja" },
+      { id: "s3", date: "2026-10-08 12:40", productId: "p6", productName: "Foco LED 12W Luz Fría", category: "Electricidad", quantity: 6, unitPrice: 2.50, total: 15.00, client: "Cliente Mostrador", seller: "Ventas" },
+      { id: "s4", date: "2026-10-08 14:10", productId: "p7", productName: "Bolsa de Cemento Portland", category: "Construcción", quantity: 10, unitPrice: 7.20, total: 72.00, client: "Contratista Rojas", seller: "Caja" }
     ];
 
     const sampleLoans = [
-      { id: "l1", productId: "p9", productName: "Taladro Percutor 750W", receiver: "Maestro Pepe", authorizer: "Papá", date: "2026-10-08 09:00", returned: false }
+      { id: "l1", productId: "p9", productName: "Taladro Percutor 750W", receiver: "Maestro Juan", authorizer: "Administración", date: "2026-10-08 09:00", returned: false }
     ];
 
     const sampleLogs = [
-      { id: "g1", date: "2026-10-08 09:30", user: "Técnico Juan", item: "Amoladora DeWalt", procedure: "Corte de fierro corrugado para estribos de columna", notes: "Disco con 50% de vida útil" }
+      { id: "g1", date: "2026-10-08 09:30", user: "Técnico Especialista", item: "Amoladora DeWalt", procedure: "Corte de fierro corrugado para estribos de columna", notes: "Disco con 50% de vida útil" }
     ];
+
+    // Funciones de persistencia garantizada en el navegador (Local Storage)
+    function persistDataToStorage() {
+      try {
+        localStorage.setItem('ferreteria_inventory', JSON.stringify(inventoryData));
+        localStorage.setItem('ferreteria_sales', JSON.stringify(salesData));
+        localStorage.setItem('ferreteria_loans', JSON.stringify(loansData));
+      } catch (err) {
+        console.warn("No se pudo escribir en localStorage:", err);
+      }
+    }
 
     function startApplication() {
       const cfgToken = document.getElementById('cfg-tg-token');
@@ -1560,28 +1571,29 @@
 
     function syncFirestoreData() {
       if (!db) {
-        loadSampleData();
+        loadInitialData();
         return;
       }
 
-      // Si la base de datos está vacía, cargamos inicialmente datos de muestra para que tus padres vean la ferretería activa
+      // Si la base de datos está vacía o hay error de reglas, recuperamos lo guardado por el usuario
       db.collection("inventory").onSnapshot(snapshot => {
         if (snapshot.empty) {
-          console.log("Inventario en Firebase vacío, cargando catálogo inicial de demostración...");
-          loadSampleData();
+          console.log("Inventario en Firebase no tiene registros aún. Cargando datos locales guardados...");
+          loadInitialData();
         } else {
           inventoryData = [];
           snapshot.forEach(doc => {
             inventoryData.push({ id: doc.id, ...doc.data() });
           });
+          persistDataToStorage();
           renderInventoryTable();
           updateProductSelectors();
           calculateDashboardMetrics();
         }
       }, err => {
         console.warn("Aviso Firestore Inventario (¿Reglas o Colección?):", err);
-        // Si hay error de permisos en Firestore, mantener la app visible y funcional
-        loadSampleData();
+        // Si hay error de permisos en Firestore, mantener la app con los datos que el usuario ya guardó
+        loadInitialData();
       });
 
       db.collection("sales").orderBy("date", "desc").onSnapshot(snapshot => {
@@ -1590,6 +1602,7 @@
           snapshot.forEach(doc => {
             salesData.push({ id: doc.id, ...doc.data() });
           });
+          persistDataToStorage();
           renderSalesTable();
           calculateDashboardMetrics();
         }
@@ -1601,6 +1614,7 @@
           snapshot.forEach(doc => {
             loansData.push({ id: doc.id, ...doc.data() });
           });
+          persistDataToStorage();
           renderLoansTable();
           calculateDashboardMetrics();
         }
@@ -1617,10 +1631,42 @@
       }, err => console.warn("Aviso Firestore Bitácora:", err));
     }
 
-    function loadSampleData() {
-      inventoryData = [...sampleInventory];
-      salesData = [...sampleSales];
-      loansData = [...sampleLoans];
+    // Carga los datos guardados por el usuario desde localStorage, o los valores iniciales solo si la app está en blanco
+    function loadInitialData() {
+      const savedInv = localStorage.getItem('ferreteria_inventory');
+      const savedSales = localStorage.getItem('ferreteria_sales');
+      const savedLoans = localStorage.getItem('ferreteria_loans');
+
+      if (savedInv) {
+        try {
+          inventoryData = JSON.parse(savedInv);
+        } catch (e) {
+          inventoryData = [...sampleInventory];
+        }
+      } else {
+        inventoryData = [...sampleInventory];
+      }
+
+      if (savedSales) {
+        try {
+          salesData = JSON.parse(savedSales);
+        } catch (e) {
+          salesData = [...sampleSales];
+        }
+      } else {
+        salesData = [...sampleSales];
+      }
+
+      if (savedLoans) {
+        try {
+          loansData = JSON.parse(savedLoans);
+        } catch (e) {
+          loansData = [...sampleLoans];
+        }
+      } else {
+        loansData = [...sampleLoans];
+      }
+
       logsData = [...sampleLogs];
 
       renderInventoryTable();
@@ -1629,6 +1675,11 @@
       renderLogsTable();
       updateProductSelectors();
       calculateDashboardMetrics();
+    }
+
+    // Alias para compatibilidad
+    function loadSampleData() {
+      loadInitialData();
     }
 
     function initEventHandlers() {
@@ -1915,6 +1966,7 @@
       if (prod && newStock !== null) {
         prod.stock = newStock;
       }
+      persistDataToStorage();
       renderSalesTable();
       renderInventoryTable();
       updateProductSelectors();
@@ -2064,6 +2116,7 @@
           .catch(err => {
             console.warn("Fallo borrado Firestore, removiendo de pantalla:", err);
             inventoryData = inventoryData.filter(p => p.id !== id);
+            persistDataToStorage();
             renderInventoryTable();
             updateProductSelectors();
             calculateDashboardMetrics();
@@ -2071,6 +2124,7 @@
           });
       } else {
         inventoryData = inventoryData.filter(p => p.id !== id);
+        persistDataToStorage();
         renderInventoryTable();
         updateProductSelectors();
         calculateDashboardMetrics();
@@ -2110,6 +2164,12 @@
           db.collection("inventory").doc(id).update(productObj)
             .then(() => {
               restoreBtn();
+              const idx = inventoryData.findIndex(p => p.id === id);
+              if (idx !== -1) inventoryData[idx] = { id, ...productObj };
+              persistDataToStorage();
+              renderInventoryTable();
+              updateProductSelectors();
+              calculateDashboardMetrics();
               showToast("Producto actualizado exitosamente.", "success");
               closeModal('modal-product');
             })
@@ -2119,6 +2179,7 @@
               // Si falla por reglas de Firestore, guardamos localmente para no frustrar la operación
               const idx = inventoryData.findIndex(p => p.id === id);
               if (idx !== -1) inventoryData[idx] = { id, ...productObj };
+              persistDataToStorage();
               renderInventoryTable();
               updateProductSelectors();
               calculateDashboardMetrics();
@@ -2127,21 +2188,27 @@
             });
         } else {
           db.collection("inventory").add(productObj)
-            .then(() => {
+            .then((docRef) => {
               restoreBtn();
+              inventoryData.unshift({ id: docRef.id, ...productObj });
+              persistDataToStorage();
+              renderInventoryTable();
+              updateProductSelectors();
+              calculateDashboardMetrics();
               showToast("Nuevo artículo guardado en inventario.", "success");
               closeModal('modal-product');
             })
             .catch(err => {
               restoreBtn();
               console.error("Error al agregar en Firestore:", err);
-              // Fallback automático para que siempre se agregue a la pantalla
+              // Fallback automático para que siempre se agregue a la pantalla y localStorage
               inventoryData.unshift({ id: 'p_' + Date.now(), ...productObj });
+              persistDataToStorage();
               renderInventoryTable();
               updateProductSelectors();
               calculateDashboardMetrics();
               closeModal('modal-product');
-              showToast("Guardado en pantalla (Aviso Firestore: " + (err.code || err.message) + ")", "warning");
+              showToast("Guardado y respaldado en navegador (Aviso Firestore: " + (err.code || err.message) + ")", "warning");
             });
         }
       } else {
@@ -2154,6 +2221,7 @@
           inventoryData.push({ id: 'p_' + Date.now(), ...productObj });
           showToast("Producto agregado al catálogo (Local).", "success");
         }
+        persistDataToStorage();
         renderInventoryTable();
         updateProductSelectors();
         calculateDashboardMetrics();
@@ -2222,10 +2290,11 @@
       }
 
       function applyLocalSaleFallback(reasonMsg) {
-        // Asegura que la venta quede registrada y el stock descontado en pantalla
+        // Asegura que la venta quede registrada y el stock descontado en pantalla y guardado
         const saleId = 's_' + Date.now();
         salesData.unshift({ id: saleId, ...saleRecord });
         prod.stock = newStock;
+        persistDataToStorage();
         renderInventoryTable();
         renderSalesTable();
         updateProductSelectors();
@@ -2245,18 +2314,20 @@
         // Intentar registrar en Firestore
         db.collection("sales").add(saleRecord)
           .then((saleDoc) => {
+            // Guardar localmente también para persistencia instantánea
+            salesData.unshift({ id: saleDoc.id, ...saleRecord });
+            prod.stock = newStock;
+            persistDataToStorage();
+            renderSalesTable();
+            renderInventoryTable();
+            calculateDashboardMetrics();
+
             // Si el producto tiene un ID guardado en Firestore, actualizar su stock en la nube
             if (prod.id && !prod.id.startsWith('p_') && !prod.id.startsWith('inv-')) {
               return db.collection("inventory").doc(prod.id).update({ stock: newStock })
                 .catch(err => {
                   console.warn("Stock actualizado localmente. Aviso Firestore:", err);
                 });
-            } else {
-              // Producto local/demo: actualizar stock local
-              prod.stock = newStock;
-              renderInventoryTable();
-              updateProductSelectors();
-              calculateDashboardMetrics();
             }
           })
           .then(() => {
@@ -2322,6 +2393,7 @@
           console.error("Error al registrar préstamo en Firestore:", err);
           loansData.unshift({ id: 'l_' + Date.now(), ...loanRecord });
           prod.stock = newStock;
+          persistDataToStorage();
           renderInventoryTable();
           renderLoansTable();
           updateProductSelectors();
@@ -2332,6 +2404,7 @@
       } else {
         loansData.unshift({ id: 'l_' + Date.now(), ...loanRecord });
         prod.stock = newStock;
+        persistDataToStorage();
         renderInventoryTable();
         renderLoansTable();
         updateProductSelectors();
@@ -2354,11 +2427,18 @@
             return db.collection("inventory").doc(prod.id).update({ stock: newStock });
           }
         }).then(() => {
+          loan.returned = true;
+          if (prod) prod.stock += 1;
+          persistDataToStorage();
+          renderInventoryTable();
+          renderLoansTable();
+          calculateDashboardMetrics();
           showToast("Equipo devuelto y reingresado al inventario.", "success");
         });
       } else {
         loan.returned = true;
         if (prod) prod.stock += 1;
+        persistDataToStorage();
         renderInventoryTable();
         renderLoansTable();
         updateProductSelectors();
